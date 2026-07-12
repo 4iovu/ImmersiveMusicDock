@@ -1,0 +1,11 @@
+{
+    "display_name": "Immersive Music Dock",
+    "loading_order": 5,
+    "js": "index.js",
+    "css": "style.css",
+    "author": "4iovu",
+    "version": "1.0.0",
+    "homePage": "https://github.com/4iovu/ImmersiveMusicDock",
+    "auto_update": true,
+    "minimum_client_version": "1.12.0"
+}
