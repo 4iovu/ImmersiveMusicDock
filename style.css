@@ -14,6 +14,34 @@
     border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));
 }
 
+/* 面板标题：默认只显示这一行，点击展开/收起 */
+#mmb-settings-block .mmb-panel-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+}
+
+#mmb-settings-block .mmb-panel-title .mmb-caret {
+    transition: transform 0.15s ease;
+    opacity: 0.7;
+}
+
+#mmb-settings-block.mmb-collapsed .mmb-panel-title .mmb-caret {
+    transform: rotate(-90deg);
+}
+
+#mmb-settings-block .mmb-panel-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#mmb-settings-block.mmb-collapsed .mmb-panel-body {
+    display: none;
+}
+
 #mmb-settings-block .mmb-row {
     display: flex;
     align-items: center;
@@ -32,6 +60,10 @@
     border-radius: 6px;
 }
 
+#mmb-settings-block .mmb-theme-row.mmb-filtered-out {
+    display: none;
+}
+
 #mmb-settings-block .mmb-backup-row {
     display: flex;
     gap: 4px;
@@ -45,9 +77,24 @@
     opacity: 0.6;
 }
 
-/* ---------- 底栏音乐条：只在插件激活时显示 ---------- */
+#mmb-settings-block .mmb-enabled-disabled {
+    opacity: 0.5;
+}
+
+#mmb-panel-pause-btn {
+    cursor: pointer;
+}
+
+/* ---------- 底栏音乐条：只在插件激活时显示 ----------
+   用 order 强制排到 #nonQRFormItems 最左侧，
+   不依赖按钮的 DOM 顺序，也不与任何按钮的定位绑定。 */
+#nonQRFormItems {
+    position: relative;
+}
+
 #custom-music-bar {
     display: none;
+    order: -9999;
     align-items: center;
     flex-shrink: 0;
     gap: 4px;
@@ -78,6 +125,7 @@ body.mmb-active #custom-music-bar {
     cursor: pointer;
     border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.4));
     transition: transform 0.15s ease;
+    background: rgba(128,128,128,0.25);
 }
 
 #custom-music-bar .mmb-avatar:hover {
@@ -94,17 +142,6 @@ body.mmb-active #custom-music-bar {
     z-index: 1;
 }
 
-#custom-music-bar .mmb-pause-btn {
-    flex-shrink: 0;
-    cursor: pointer;
-    opacity: 0.75;
-    font-size: 0.9em;
-}
-
-#custom-music-bar .mmb-pause-btn:hover {
-    opacity: 1;
-}
-
 #custom-music-bar .mmb-track-info {
     font-size: 0.72em;
     line-height: 1.1;
@@ -113,6 +150,14 @@ body.mmb-active #custom-music-bar {
     text-overflow: ellipsis;
     max-width: 130px;
     opacity: 0.85;
+    min-width: 0;
+}
+
+/* 没有曲目信息时不占位、不显示任何占位文字 */
+#custom-music-bar .mmb-track-info:empty,
+#custom-music-bar .mmb-track-info .mmb-title:empty,
+#custom-music-bar .mmb-track-info .mmb-artist:empty {
+    display: none;
 }
 
 #custom-music-bar .mmb-track-info .mmb-title {
@@ -136,8 +181,7 @@ body.mmb-active #nonQRFormItems .mmb-hidden-text {
     pointer-events: none;
 }
 
-/* ---------- 楼层号 "#" / 计时器 "s" / token计数 "t" 的隐藏由 JS 直接改写文本实现，
-   这里仅作为兜底：如果 JS 还没来得及处理，先用视觉手段弱化（可选） ---------- */
+/* ---------- 楼层号 "#" / 计时器 "s" / token计数 "t" 的隐藏由 JS 直接改写文本实现 ---------- */
 body.mmb-active .mesIDDisplay,
 body.mmb-active .mes_timer,
 body.mmb-active .tokenCounterDisplay {

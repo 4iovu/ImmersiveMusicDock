@@ -11,10 +11,13 @@ const EXT_ID = "mood-music-bar";
 const defaultSettings = {
     enabled: true,          // 未绑定任何美化时的手动总开关（自由开关）
     boundThemes: [],         // 绑定的 UI Theme（美化）名称列表，可多选
-    apiEndpoint: "https://meting-api.imsyy.top/?server=netease&type=search&id=", // 备用音源搜索接口（best-effort，可能需要你自行更换为可用的音源接口）
+    // 默认音源接口：公开的 Meting API 镜像，仅作示例，可能会失效，
+    // 建议自行部署 Meting-API（GitHub: metowolf/Meting-API）后替换成自己的地址。
+    apiEndpoint: "https://api.injahow.cn/meting/?server=netease&type=search&id=",
     backupUrls: [],          // 最多 5 条 [{name, url}]
     hideCounterSuffix: true, // 隐藏 s / t / #
     showAvatars: true,
+    panelCollapsed: true,    // 设置面板默认收起，只显示标题
 };
 
 // ---------------- 运行时状态（不持久化） ----------------
@@ -22,7 +25,6 @@ let audioEl = null;
 let playlist = [];       // [{title, artist, url}]
 let playlistIndex = -1;
 let isPluginActive = false;
-let barInjected = false;
 let currentMoodQuery = "";
 
 // ============================================================
@@ -46,6 +48,7 @@ function saveSettings() {
 
 // ============================================================
 // 设置面板：插入到 “自定义CSS”（#CustomCSS-block）下方
+// 默认折叠，只显示标题，点击标题展开/收起
 // ============================================================
 function buildSettingsPanel() {
     if ($('#mmb-settings-block').length) return; // 已存在，避免重复插入
@@ -53,65 +56,87 @@ function buildSettingsPanel() {
     const settings = getSettings();
 
     const panel = $(`
-    <div id="mmb-settings-block" class="flex-container flexFlowColumn">
-        <h4 class="title_restorable" title="角色氛围音乐 & 底栏美化插件设置">
+    <div id="mmb-settings-block" class="flex-container flexFlowColumn ${settings.panelCollapsed ? 'mmb-collapsed' : ''}">
+        <h4 class="title_restorable mmb-panel-title" title="点击展开/收起">
             <span>氛围音乐 &amp; 底栏美化</span>
+            <i class="fa-solid fa-chevron-down mmb-caret"></i>
         </h4>
 
-        <div class="mmb-row">
-            <label class="checkbox_label">
-                <input type="checkbox" id="mmb-enabled" ${settings.enabled ? 'checked' : ''}>
-                <span>手动启用（未绑定任何美化时生效；绑定美化后由自动切换接管）</span>
-            </label>
-        </div>
+        <div class="mmb-panel-body">
+            <div class="mmb-row">
+                <label class="checkbox_label">
+                    <input type="checkbox" id="mmb-enabled" ${settings.enabled ? 'checked' : ''}>
+                    <span>手动启用（仅在未绑定任何美化时生效）</span>
+                </label>
+            </div>
 
-        <div class="mmb-row">
-            <small>绑定美化（可多选，切到这些 UI Theme 时自动开启，切走自动关闭）：</small>
-        </div>
-        <div class="mmb-theme-list" id="mmb-theme-list"></div>
+            <div class="mmb-row">
+                <small>绑定美化（可多选，切到这些 UI Theme 时自动开启，切走自动关闭；绑定后手动开关自动失效）：</small>
+            </div>
+            <div class="mmb-row">
+                <input type="text" id="mmb-theme-search" class="text_pole" placeholder="搜索美化名称..." style="flex:1">
+            </div>
+            <div class="mmb-theme-list" id="mmb-theme-list"></div>
 
-        <div class="mmb-row">
-            <label class="checkbox_label">
-                <input type="checkbox" id="mmb-hide-suffix" ${settings.hideCounterSuffix ? 'checked' : ''}>
-                <span>隐藏计时器"s" / token计数"t" / 楼层号前的"#"</span>
-            </label>
-        </div>
+            <div class="mmb-row">
+                <label class="checkbox_label">
+                    <input type="checkbox" id="mmb-hide-suffix" ${settings.hideCounterSuffix ? 'checked' : ''}>
+                    <span>隐藏计时器"s" / token计数"t" / 楼层号前的"#"</span>
+                </label>
+            </div>
 
-        <div class="mmb-row">
-            <small class="mmb-hint">自动音源接口（找不到歌时可自行更换为可用的音乐搜索API）：</small>
-        </div>
-        <div class="mmb-row">
-            <input type="text" id="mmb-api-endpoint" class="text_pole" style="flex:1" value="${settings.apiEndpoint}">
-        </div>
+            <div class="mmb-row">
+                <small class="mmb-hint">自动音源接口（找不到歌时可自行更换为可用的音乐搜索API）：</small>
+            </div>
+            <div class="mmb-row">
+                <input type="text" id="mmb-api-endpoint" class="text_pole" style="flex:1" value="${settings.apiEndpoint}">
+            </div>
 
-        <div class="mmb-row">
-            <small class="mmb-hint">备用音源 URL（最多 5 条，自动搜索失败时会依次使用）：</small>
-        </div>
-        <div id="mmb-backup-list"></div>
-        <div class="mmb-row">
-            <div class="menu_button" id="mmb-add-backup">+ 添加备用音源</div>
-            <div class="menu_button" id="mmb-save-backup">保存备用音源</div>
-        </div>
+            <div class="mmb-row">
+                <small class="mmb-hint">备用音源 URL（最多 5 条，自动搜索失败/播放报错时会依次尝试）：</small>
+            </div>
+            <div id="mmb-backup-list"></div>
+            <div class="mmb-row">
+                <div class="menu_button" id="mmb-add-backup">+ 添加备用音源</div>
+                <div class="menu_button" id="mmb-save-backup">保存备用音源</div>
+            </div>
 
-        <div class="mmb-row">
-            <div class="menu_button" id="mmb-test-play">测试播放当前角色的氛围音乐</div>
+            <div class="mmb-row">
+                <div class="menu_button" id="mmb-test-play">测试播放当前角色的氛围音乐</div>
+                <div class="menu_button" id="mmb-panel-pause-btn" title="暂停/播放">
+                    <i class="fa-solid fa-pause"></i>
+                    <span>暂停/播放</span>
+                </div>
+            </div>
         </div>
     </div>
     `);
 
     $('#CustomCSS-block').after(panel);
 
-    // 填充美化（UI Theme）列表
+    // 展开/收起
+    panel.find('.mmb-panel-title').on('click', function () {
+        panel.toggleClass('mmb-collapsed');
+        settings.panelCollapsed = panel.hasClass('mmb-collapsed');
+        saveSettings();
+    });
+
     refreshThemeList();
-
-    // 填充备用音源列表
     renderBackupList();
+    refreshEnabledCheckboxState();
 
-    // 绑定事件
     $('#mmb-enabled').on('change', function () {
         settings.enabled = $(this).is(':checked');
         saveSettings();
         evaluateActiveState();
+    });
+
+    $('#mmb-theme-search').on('input', function () {
+        const q = $(this).val().trim().toLowerCase();
+        $('#mmb-theme-list .mmb-theme-row').each(function () {
+            const name = $(this).data('name').toLowerCase();
+            $(this).toggleClass('mmb-filtered-out', q.length > 0 && !name.includes(q));
+        });
     });
 
     $('#mmb-hide-suffix').on('change', function () {
@@ -150,6 +175,24 @@ function buildSettingsPanel() {
     $('#mmb-test-play').on('click', function () {
         startMoodMusicForCurrentCharacter(true);
     });
+
+    $('#mmb-panel-pause-btn').on('click', function () {
+        togglePause();
+    });
+}
+
+function refreshEnabledCheckboxState() {
+    const settings = getSettings();
+    const bound = settings.boundThemes.length > 0;
+    const checkbox = $('#mmb-enabled');
+    checkbox.prop('disabled', bound);
+    checkbox.closest('.mmb-row').toggleClass('mmb-enabled-disabled', bound);
+    if (bound) {
+        // 绑定美化后，手动开关强制关闭，交由自动切换接管
+        settings.enabled = false;
+        checkbox.prop('checked', false);
+        saveSettings();
+    }
 }
 
 function renderBackupList() {
@@ -193,7 +236,7 @@ function refreshThemeList() {
     themeNames.forEach((name) => {
         const checked = settings.boundThemes.includes(name) ? 'checked' : '';
         const row = $(`
-        <label class="checkbox_label">
+        <label class="checkbox_label mmb-theme-row" data-name="${name}">
             <input type="checkbox" class="mmb-theme-checkbox" value="${name}" ${checked}>
             <span>${name}</span>
         </label>
@@ -209,6 +252,7 @@ function refreshThemeList() {
             settings.boundThemes = settings.boundThemes.filter(n => n !== name);
         }
         saveSettings();
+        refreshEnabledCheckboxState();
         evaluateActiveState();
     });
 }
@@ -225,7 +269,7 @@ function evaluateActiveState() {
     let shouldBeActive;
 
     if (settings.boundThemes.length > 0) {
-        // 已绑定美化：只在绑定的美化被选中时自动开启
+        // 已绑定美化：只在绑定的美化被选中时自动开启，手动开关此时无效
         shouldBeActive = settings.boundThemes.includes(getCurrentThemeName());
     } else {
         // 未绑定任何美化：完全由手动开关决定（自由开关）
@@ -255,7 +299,9 @@ function setPluginActive(active) {
 }
 
 // ============================================================
-// 底栏：#custom-music-bar，插入到 #nonQRFormItems 最前面
+// 底栏：#custom-music-bar，插入到 #nonQRFormItems 内，
+// 通过 CSS order 强制排到最左侧，不依赖任何按钮的位置/顺序。
+// 暂停按钮已移动到设置面板，底栏不再放置暂停按钮。
 // ============================================================
 function injectBar() {
     if ($('#custom-music-bar').length) return;
@@ -266,48 +312,54 @@ function injectBar() {
             <img class="mmb-avatar mmb-avatar-char" src="" title="上一首（点击角色头像）">
             <img class="mmb-avatar mmb-avatar-user" src="" title="下一首（点击用户头像）">
         </div>
-        <div class="mmb-pause-btn fa-solid fa-pause" title="暂停/播放"></div>
         <div class="mmb-track-info">
-            <span class="mmb-title">未播放</span>
+            <span class="mmb-title"></span>
             <span class="mmb-artist"></span>
         </div>
     </div>
     `);
 
     $('#nonQRFormItems').prepend(bar);
-    barInjected = true;
 
     updateAvatars();
 
     $('#custom-music-bar .mmb-avatar-char').on('click', () => prevTrack());
     $('#custom-music-bar .mmb-avatar-user').on('click', () => nextTrack());
-    $('#custom-music-bar .mmb-pause-btn').on('click', () => togglePause());
 }
 
 function removeBar() {
     $('#custom-music-bar').remove();
-    barInjected = false;
 }
 
+// 获取头像：优先直接从聊天里已经渲染出来的头像 <img> 复制 src，
+// 这是最可靠的方式，不依赖任何猜测出来的接口路径，
+// 也天然兼容群聊（会拿到最近一条消息真正显示的头像）。
 function updateAvatars() {
     try {
-        const context = getContext();
-        const charId = context.characterId;
-        let charAvatarUrl = '';
-        let userAvatarUrl = '';
+        let charSrc = '';
+        let userSrc = '';
 
-        if (charId !== undefined && context.characters?.[charId]?.avatar) {
-            const avatarFile = context.characters[charId].avatar;
-            charAvatarUrl = `/thumbnail?type=avatar&file=${encodeURIComponent(avatarFile)}`;
+        const lastCharMes = $('#chat .mes[is_user="false"]').last();
+        const lastUserMes = $('#chat .mes[is_user="true"]').last();
+
+        if (lastCharMes.length) charSrc = lastCharMes.find('.avatar img').attr('src') || '';
+        if (lastUserMes.length) userSrc = lastUserMes.find('.avatar img').attr('src') || '';
+
+        // 回退方案 1：角色列表里对应 chid 的缩略图
+        if (!charSrc) {
+            const context = getContext();
+            const charId = context.characterId;
+            if (charId !== undefined) {
+                charSrc = $(`#rm_print_characters_block .character_select[chid="${charId}"] img`).attr('src') || '';
+            }
+            // 回退方案 2：直接拼接缩略图接口
+            if (!charSrc && context.characters?.[charId]?.avatar) {
+                charSrc = `/thumbnail?type=avatar&file=${encodeURIComponent(context.characters[charId].avatar)}`;
+            }
         }
 
-        // 用户头像：SillyTavern 的用户头像路径，若你的版本不同，请手动调整此处路径
-        if (context.userAvatar) {
-            userAvatarUrl = `/thumbnail?type=persona&file=${encodeURIComponent(context.userAvatar)}`;
-        }
-
-        if (charAvatarUrl) $('#custom-music-bar .mmb-avatar-char').attr('src', charAvatarUrl);
-        if (userAvatarUrl) $('#custom-music-bar .mmb-avatar-user').attr('src', userAvatarUrl);
+        if (charSrc) $('#custom-music-bar .mmb-avatar-char').attr('src', charSrc);
+        if (userSrc) $('#custom-music-bar .mmb-avatar-user').attr('src', userSrc);
     } catch (e) {
         console.warn('[mood-music-bar] 获取头像失败', e);
     }
@@ -316,11 +368,12 @@ function updateAvatars() {
 function updateTrackInfoDisplay() {
     const track = playlist[playlistIndex];
     if (!track) {
-        $('#custom-music-bar .mmb-title').text('未播放');
+        // 未播放时不显示任何占位文字，直接留空
+        $('#custom-music-bar .mmb-title').text('');
         $('#custom-music-bar .mmb-artist').text('');
         return;
     }
-    $('#custom-music-bar .mmb-title').text(track.title || '未知曲名');
+    $('#custom-music-bar .mmb-title').text(track.title || '');
     $('#custom-music-bar .mmb-artist').text(track.artist || '');
 }
 
@@ -394,13 +447,36 @@ function startCounterSuffixObserver() {
 
 // ============================================================
 // 音乐：读取角色文本 -> 生成氛围关键词 -> 搜索 -> 播放
+// 播放失败（含跨域/链接失效/接口返回异常）会自动尝试下一个候选，
+// 候选耗尽再切换到备用音源列表。
 // ============================================================
 function getAudioEl() {
     if (!audioEl) {
         audioEl = new Audio();
         audioEl.addEventListener('ended', () => nextTrack(true));
+        audioEl.addEventListener('error', () => onPlaybackError());
     }
     return audioEl;
+}
+
+let usingBackupList = false;
+
+function onPlaybackError() {
+    console.warn('[mood-music-bar] 当前曲目播放失败，尝试下一个候选');
+    if (playlistIndex < playlist.length - 1) {
+        playlistIndex += 1;
+        playCurrentTrack();
+        return;
+    }
+    if (!usingBackupList) {
+        if (!useBackupPlaylist()) {
+            updateTrackInfoDisplay();
+            toastr?.warning?.('自动搜索与备用音源均播放失败，请检查音源接口/备用链接是否有效');
+        }
+    } else {
+        updateTrackInfoDisplay();
+        toastr?.warning?.('备用音源也播放失败了，请检查链接是否为可直接播放的音频地址');
+    }
 }
 
 async function buildMoodQueryForCurrentCharacter() {
@@ -429,23 +505,40 @@ async function buildMoodQueryForCurrentCharacter() {
 async function searchMusicByQuery(query) {
     const settings = getSettings();
     if (!settings.apiEndpoint) throw new Error('未配置音源接口');
-    const res = await fetch(settings.apiEndpoint + encodeURIComponent(query));
-    if (!res.ok) throw new Error('音源接口请求失败: ' + res.status);
-    const data = await res.json();
+
+    let res;
+    try {
+        res = await fetch(settings.apiEndpoint + encodeURIComponent(query));
+    } catch (e) {
+        throw new Error('音源接口请求失败（网络/跨域错误）: ' + e.message);
+    }
+    if (!res.ok) throw new Error('音源接口请求失败，状态码: ' + res.status);
+
+    let data;
+    try {
+        data = await res.json();
+    } catch (e) {
+        throw new Error('音源接口返回内容不是合法 JSON，接口可能已变更或失效');
+    }
+
     const list = Array.isArray(data) ? data : (data.result?.songs || data.data || []);
     if (!Array.isArray(list) || list.length === 0) throw new Error('未搜索到匹配的歌曲');
 
-    return list.slice(0, 10).map((item) => ({
-        title: item.name || item.title || '未知曲名',
-        artist: item.artist || item.author || (Array.isArray(item.artists) ? item.artists.map(a => a.name).join('/') : '未知歌手'),
+    const mapped = list.slice(0, 10).map((item) => ({
+        title: item.name || item.title || '',
+        artist: item.artist || item.author || (Array.isArray(item.artists) ? item.artists.map(a => a.name).join('/') : ''),
         url: item.url || item.songUrl || '',
     })).filter(t => t.url);
+
+    if (mapped.length === 0) throw new Error('搜索结果中没有可播放的音频链接（可能是版权限制）');
+    return mapped;
 }
 
 function useBackupPlaylist() {
     const settings = getSettings();
     if (!settings.backupUrls.length) return false;
-    playlist = settings.backupUrls.map(b => ({ title: b.name || '备用音源', artist: '', url: b.url }));
+    usingBackupList = true;
+    playlist = settings.backupUrls.map(b => ({ title: b.name || '', artist: '', url: b.url }));
     playlistIndex = 0;
     playCurrentTrack();
     return true;
@@ -453,6 +546,7 @@ function useBackupPlaylist() {
 
 async function startMoodMusicForCurrentCharacter(forceTest) {
     if (!isPluginActive && !forceTest) return;
+    usingBackupList = false;
     try {
         currentMoodQuery = await buildMoodQueryForCurrentCharacter();
         const found = await searchMusicByQuery(currentMoodQuery);
@@ -460,10 +554,10 @@ async function startMoodMusicForCurrentCharacter(forceTest) {
         playlistIndex = 0;
         playCurrentTrack();
     } catch (e) {
-        console.warn('[mood-music-bar] 自动搜索音乐失败，尝试使用备用音源', e);
+        console.warn('[mood-music-bar] 自动搜索音乐失败，尝试使用备用音源：', e.message);
         if (!useBackupPlaylist()) {
             updateTrackInfoDisplay();
-            toastr?.warning?.('未找到氛围音乐，且未配置备用音源，可在设置面板中添加备用音源URL');
+            toastr?.warning?.('自动搜索音乐失败（' + e.message + '），且未配置备用音源，可在设置面板中添加备用音源URL');
         }
     }
 }
@@ -474,11 +568,11 @@ function playCurrentTrack() {
     const audio = getAudioEl();
     audio.src = track.url;
     audio.play().catch((e) => {
-        // 浏览器自动播放策略可能会拦截，需要用户先与页面交互一次
-        console.warn('[mood-music-bar] 播放被拦截，需用户手动点击一次页面/暂停按钮', e);
+        // 浏览器自动播放策略可能会拦截，需要用户先与页面交互一次；
+        // 这不算真正的"播放失败"，所以这里不触发 onPlaybackError。
+        console.warn('[mood-music-bar] 播放被拦截，可能需要用户先点一下页面/面板里的暂停播放按钮', e);
     });
     updateTrackInfoDisplay();
-    $('#custom-music-bar .mmb-pause-btn').removeClass('fa-play').addClass('fa-pause');
 }
 
 function nextTrack(auto = false) {
@@ -486,7 +580,7 @@ function nextTrack(auto = false) {
     if (playlistIndex < playlist.length - 1) {
         playlistIndex += 1;
         playCurrentTrack();
-    } else if (auto) {
+    } else if (auto && !usingBackupList) {
         // 播完一轮后，重新按角色氛围搜索下一批
         startMoodMusicForCurrentCharacter(false);
     } else {
@@ -505,10 +599,10 @@ function togglePause() {
     const audio = getAudioEl();
     if (audio.paused) {
         audio.play().catch(() => {});
-        $('#custom-music-bar .mmb-pause-btn').removeClass('fa-play').addClass('fa-pause');
+        $('#mmb-panel-pause-btn i').removeClass('fa-play').addClass('fa-pause');
     } else {
         audio.pause();
-        $('#custom-music-bar .mmb-pause-btn').removeClass('fa-pause').addClass('fa-play');
+        $('#mmb-panel-pause-btn i').removeClass('fa-pause').addClass('fa-play');
     }
 }
 
@@ -541,8 +635,14 @@ jQuery(async () => {
         startMoodMusicForCurrentCharacter(false);
     });
 
-    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => stripKnownSuffixes());
-    eventSource.on(event_types.USER_MESSAGE_RENDERED, () => stripKnownSuffixes());
+    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, () => {
+        stripKnownSuffixes();
+        if (isPluginActive) updateAvatars();
+    });
+    eventSource.on(event_types.USER_MESSAGE_RENDERED, () => {
+        stripKnownSuffixes();
+        if (isPluginActive) updateAvatars();
+    });
 
     // 初始状态判定
     evaluateActiveState();
